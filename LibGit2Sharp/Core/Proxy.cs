@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -211,7 +212,7 @@ namespace LibGit2Sharp.Core
                 int res = NativeMethods.git_branch_remote_name(buf, repo, canonical_branch_name);
 
                 if (!shouldThrowIfNotFound &&
-                    (res == (int) GitErrorCode.NotFound || res == (int) GitErrorCode.Ambiguous))
+                    (res == (int)GitErrorCode.NotFound || res == (int)GitErrorCode.Ambiguous))
                 {
                     return null;
                 }
@@ -227,7 +228,7 @@ namespace LibGit2Sharp.Core
             using (var buf = new GitBuf())
             {
                 int res = NativeMethods.git_branch_upstream_name(buf, handle, canonicalReferenceName);
-                if (res == (int) GitErrorCode.NotFound)
+                if (res == (int)GitErrorCode.NotFound)
                 {
                     return null;
                 }
@@ -816,7 +817,7 @@ namespace LibGit2Sharp.Core
 
         public static GitDiffDelta git_diff_get_delta(DiffSafeHandle diff, int idx)
         {
-            return NativeMethods.git_diff_get_delta(diff, (UIntPtr) idx).MarshalAs<GitDiffDelta>(false);
+            return NativeMethods.git_diff_get_delta(diff, (UIntPtr)idx).MarshalAs<GitDiffDelta>(false);
         }
 
         #endregion
@@ -1576,7 +1577,7 @@ namespace LibGit2Sharp.Core
                 {
                     fixed (byte *p = data)
                     {
-                        res = NativeMethods.git_odb_stream_write(stream, (IntPtr) p, (UIntPtr) len);
+                        res = NativeMethods.git_odb_stream_write(stream, (IntPtr)p, (UIntPtr)len);
                     }
                 }
 
@@ -1615,7 +1616,7 @@ namespace LibGit2Sharp.Core
             using (ThreadAffinity())
             {
                 PatchSafeHandle handle;
-                int res = NativeMethods.git_patch_from_diff(out handle, diff, (UIntPtr) idx);
+                int res = NativeMethods.git_patch_from_diff(out handle, diff, (UIntPtr)idx);
                 Ensure.ZeroResult(res);
                 return handle;
             }
@@ -1639,6 +1640,190 @@ namespace LibGit2Sharp.Core
                 Ensure.ZeroResult(res);
                 return new Tuple<int, int>((int)add, (int)del);
             }
+        }
+
+        #endregion
+
+        #region git_rebase
+
+        public static RebaseSafeHandle git_rebase_init(
+            RepositorySafeHandle repo,
+            GitAnnotatedCommitHandle branch,
+            GitAnnotatedCommitHandle upstream,
+            GitAnnotatedCommitHandle onto,
+            ref GitRebaseOptions options)
+        {
+            RebaseSafeHandle rebase = null;
+
+            using (ThreadAffinity())
+            {
+                int result = NativeMethods.git_rebase_init(out rebase, repo, branch, upstream, onto, ref options);
+                Ensure.ZeroResult(result);
+            }
+
+            return rebase;
+        }
+
+        public static RebaseSafeHandle git_rebase_open(RepositorySafeHandle repo)
+        {
+            RebaseSafeHandle rebase = null;
+
+            using (ThreadAffinity())
+            {
+                int result = NativeMethods.git_rebase_open(out rebase, repo);
+                Ensure.ZeroResult(result);
+            }
+
+            return rebase;
+        }
+
+        public static long git_rebase_operation_entrycount(RebaseSafeHandle rebase)
+        {
+            return NativeMethods.git_rebase_operation_entrycount(rebase).ConvertToLong();
+        }
+
+        public static long git_rebase_operation_current(RebaseSafeHandle rebase)
+        {
+            return NativeMethods.git_rebase_operation_current(rebase).ConvertToLong();
+        }
+
+        public static GitRebaseOperation git_rebase_operation_byindex(
+            RebaseSafeHandle rebase,
+            long index)
+        {
+            Debug.Assert(index >= 0);
+            IntPtr ptr = NativeMethods.git_rebase_operation_byindex(rebase, ((UIntPtr)index));
+            GitRebaseOperation operation = ptr.MarshalAs<GitRebaseOperation>();
+
+            // Workaround until 92e87dd74 from libgit2 is consumed by LibGit2#
+            operation.exec = IntPtr.Zero;
+            return operation;
+        }
+
+        /// <summary>
+        /// Returns null when finished.
+        /// </summary>
+        /// <param name="rebase"></param>
+        /// <param name="options"></param>
+        /// <returns></returns>
+        public static GitRebaseOperation git_rebase_next(RebaseSafeHandle rebase,
+            ref GitCheckoutOpts options)
+        {
+            GitRebaseOperation operation = null;
+            using (ThreadAffinity())
+            {
+                IntPtr ptr;
+                int result = NativeMethods.git_rebase_next(out ptr, rebase, ref options);
+                if (result == (int)GitErrorCode.IterOver)
+                {
+                    return null;
+                }
+                Ensure.ZeroResult(result);
+
+                // If successsful, then marshal native struct to managed struct.
+                operation = ptr.MarshalAs<GitRebaseOperation>();
+
+                // Workaround until 92e87dd74 from libgit2 is consumed by LibGit2#
+                operation.exec = IntPtr.Zero;
+            }
+
+            return operation;
+        }
+
+        public static GitRebaseCommitResult git_rebase_commit(
+            RebaseSafeHandle rebase,
+            Signature author,
+            Signature committer)
+        {
+            Ensure.ArgumentNotNull(rebase, "rebase");
+            Ensure.ArgumentNotNull(committer, "committer");
+
+            GitRebaseCommitResult commitResult = new GitRebaseCommitResult();
+
+            using (ThreadAffinity())
+            {
+                SignatureSafeHandle authorHandle = null;
+                SignatureSafeHandle committerHandle = null;
+
+                try
+                {
+                    committerHandle = committer.BuildHandle();
+                    authorHandle = author == null ?
+                        new SignatureSafeHandle() : author.BuildHandle();
+
+                    int result = NativeMethods.git_rebase_commit(ref commitResult.CommitId, rebase, authorHandle, committerHandle, IntPtr.Zero, IntPtr.Zero);
+
+                    if (result == (int)GitErrorCode.Applied)
+                    {
+                        commitResult.CommitId = GitOid.Empty;
+                        commitResult.WasPatchAlreadyApplied = true;
+                    }
+                    else
+                    {
+                        Ensure.ZeroResult(result);
+                    }
+                }
+                finally
+                {
+                    committerHandle.Dispose();
+                    committerHandle = null;
+
+                    authorHandle.SafeDispose();
+                    authorHandle = null;
+                }
+            }
+
+            return commitResult;
+        }
+
+        /// <summary>
+        /// Struct to report the result of calling git_rebase_commit.
+        /// </summary>
+        public struct GitRebaseCommitResult
+        {
+            /// <summary>
+            /// The ID of the commit that was generated, if any
+            /// </summary>
+            public GitOid CommitId;
+
+            /// <summary>
+            /// bool to indicate if the patch was already applied.
+            /// If Patch was already applied, then CommitId will be empty (all zeros).
+            /// </summary>
+            public bool WasPatchAlreadyApplied;
+        }
+
+        public static void git_rebase_abort(
+            RebaseSafeHandle rebase)
+        {
+            Ensure.ArgumentNotNull(rebase, "rebase");
+
+            using (ThreadAffinity())
+            {
+                int result = NativeMethods.git_rebase_abort(rebase);
+                Ensure.ZeroResult(result);
+            }
+        }
+
+        public static void git_rebase_finish(
+            RebaseSafeHandle rebase,
+            Signature signature,
+            GitRebaseOptions options)
+        {
+            Ensure.ArgumentNotNull(rebase, "rebase");
+            Ensure.ArgumentNotNull(signature, "signature");
+
+            using (ThreadAffinity())
+            using (var signatureHandle = signature.BuildHandle())
+            {
+                int result = NativeMethods.git_rebase_finish(rebase, signatureHandle, ref options);
+                Ensure.ZeroResult(result);
+            }
+        }
+
+        public static void git_rebase_free(IntPtr rebase)
+        {
+            NativeMethods.git_rebase_free(rebase);
         }
 
         #endregion
@@ -1910,7 +2095,7 @@ namespace LibGit2Sharp.Core
 
         public static TagFetchMode git_remote_autotag(RemoteSafeHandle remote)
         {
-            return (TagFetchMode) NativeMethods.git_remote_autotag(remote);
+            return (TagFetchMode)NativeMethods.git_remote_autotag(remote);
         }
 
         public static RemoteSafeHandle git_remote_create(RepositorySafeHandle repo, string name, string url)
@@ -2229,7 +2414,7 @@ namespace LibGit2Sharp.Core
             {
                 if (callback == null)
                 {
-                    callback = problem => {};
+                    callback = problem => { };
                 }
 
                 var array = new GitStrArrayNative();
@@ -2760,7 +2945,7 @@ namespace LibGit2Sharp.Core
         {
             using (ThreadAffinity())
             {
-                int res = NativeMethods.git_stash_drop(repo, (UIntPtr) index);
+                int res = NativeMethods.git_stash_drop(repo, (UIntPtr)index);
                 Ensure.BooleanResult(res);
             }
         }
@@ -3524,6 +3709,24 @@ namespace LibGit2Sharp.Core
             }
 
             return (int)input;
+        }
+
+
+        /// <summary>
+        /// Convert a UIntPtr to a long value. Will throw
+        /// exception if there is an overflow.
+        /// </summary>
+        /// <param name="input"></param>
+        /// <returns></returns>
+        public static long ConvertToLong(this UIntPtr input)
+        {
+            ulong ulongValue = (ulong)input;
+            if (ulongValue > long.MaxValue)
+            {
+                throw new LibGit2SharpException("value exceeds size of long");
+            }
+
+            return (long)input;
         }
     }
 }
