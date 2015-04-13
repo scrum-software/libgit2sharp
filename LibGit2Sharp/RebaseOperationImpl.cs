@@ -31,12 +31,11 @@ namespace LibGit2Sharp
             Ensure.ArgumentNotNull(committer, "committer");
             Ensure.ArgumentNotNull(options, "options");
 
-            GitCheckoutOptsWrapper checkoutOptionsWrapper = new GitCheckoutOptsWrapper(options);
-            GitCheckoutOpts gitCheckoutOpts = checkoutOptionsWrapper.Options;
-            RebaseResult rebaseResult = null;
-
-            try
+            using (GitCheckoutOptsWrapper checkoutOptionsWrapper = new GitCheckoutOptsWrapper(options))
             {
+                GitCheckoutOpts gitCheckoutOpts = checkoutOptionsWrapper.Options;
+                RebaseResult rebaseResult = null;
+
                 // stepBeingApplied indicates the step that will be applied by by git_rebase_next.
                 // The current step does not get incremented until git_rebase_next (except on
                 // the initial step), but we want to report the step that will be applied.
@@ -159,14 +158,9 @@ namespace LibGit2Sharp
                                                     totalStepCount,
                                                     null);
                 }
-            }
-            finally
-            {
-                checkoutOptionsWrapper.SafeDispose();
-                checkoutOptionsWrapper = null;
-            }
 
-            return rebaseResult;
+                return rebaseResult;
+            }
         }
     }
 }

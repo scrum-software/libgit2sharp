@@ -85,77 +85,44 @@ namespace LibGit2Sharp
                     "A {0} operation is already in progress.", this.repository.Info.CurrentOperation));
             }
 
-            ReferenceSafeHandle branchRefPtr = null;
-            ReferenceSafeHandle upstreamRefPtr = null;
-            ReferenceSafeHandle ontoRefPtr = null;
-
-            GitAnnotatedCommitHandle annotatedBranchCommitHandle = null;
-            GitAnnotatedCommitHandle annotatedUpstreamRefPtrCommitHandle = null;
-            GitAnnotatedCommitHandle annotatedOntoRefPtrCommitHandle = null;
-
-            RebaseSafeHandle rebaseOperationHandle = null;
-
-            try
+            Func<Branch, ReferenceSafeHandle> RefHandleFromBranch = (Branch b) =>
             {
-                branchRefPtr = (branch == null) ?
-                    this.repository.Refs.RetrieveReferencePtr(this.repository.Head.CanonicalName) :
-                    this.repository.Refs.RetrieveReferencePtr(branch.CanonicalName);
+                return (b == null) ?
+                    null :
+                    this.repository.Refs.RetrieveReferencePtr(b.CanonicalName);
+            };
 
-                upstreamRefPtr = (upstream == null) ?
-                    null : this.repository.Refs.RetrieveReferencePtr(upstream.CanonicalName);
-
-                ontoRefPtr = (onto == null) ?
-                    null : this.repository.Refs.RetrieveReferencePtr(onto.CanonicalName);
-
-                annotatedBranchCommitHandle = (branchRefPtr == null) ?
+            Func<ReferenceSafeHandle, GitAnnotatedCommitHandle> AnnotatedCommitHandleFromRefHandle = 
+                (ReferenceSafeHandle refHandle) =>
+            {
+                return (refHandle == null) ?
                     new GitAnnotatedCommitHandle() :
-                    Proxy.git_annotated_commit_from_ref(this.repository.Handle, branchRefPtr);
+                    Proxy.git_annotated_commit_from_ref(this.repository.Handle, refHandle);
+            };
 
-                annotatedUpstreamRefPtrCommitHandle = (upstreamRefPtr == null) ?
-                    new GitAnnotatedCommitHandle() :
-                    Proxy.git_annotated_commit_from_ref(this.repository.Handle, upstreamRefPtr);
+            GitRebaseOptions gitRebaseOptions = new GitRebaseOptions()
+            {
+                version = 1,
+            };
 
-                annotatedOntoRefPtrCommitHandle = (ontoRefPtr == null) ?
-                    new GitAnnotatedCommitHandle() :
-                    Proxy.git_annotated_commit_from_ref(this.repository.Handle, ontoRefPtr);
-
-                GitRebaseOptions gitRebaseOptions = new GitRebaseOptions()
-                {
-                    version = 1,
-                };
-
-                rebaseOperationHandle = Proxy.git_rebase_init(this.repository.Handle,
-                    annotatedBranchCommitHandle,
-                    annotatedUpstreamRefPtrCommitHandle,
-                    annotatedOntoRefPtrCommitHandle,
-                    ref gitRebaseOptions);
-
-                RebaseResult rebaseResult =
-                    RebaseOperationImpl.Run(rebaseOperationHandle,
-                                            this.repository,
-                                            committer,
-                                            options,
-                                            true);
+            using (ReferenceSafeHandle branchRefPtr   = RefHandleFromBranch(branch))
+            using (ReferenceSafeHandle upstreamRefPtr = RefHandleFromBranch(upstream))
+            using (ReferenceSafeHandle ontoRefPtr     = RefHandleFromBranch(onto))
+            using (GitAnnotatedCommitHandle annotatedBranchCommitHandle      = AnnotatedCommitHandleFromRefHandle(branchRefPtr))
+            using (GitAnnotatedCommitHandle upstreamRefAnnotatedCommitHandle = AnnotatedCommitHandleFromRefHandle(upstreamRefPtr))
+            using (GitAnnotatedCommitHandle ontoRefAnnotatedCommitHandle     = AnnotatedCommitHandleFromRefHandle(ontoRefPtr))
+            using (RebaseSafeHandle rebaseOperationHandle = Proxy.git_rebase_init(this.repository.Handle,
+                                                                                  annotatedBranchCommitHandle,
+                                                                                  upstreamRefAnnotatedCommitHandle,
+                                                                                  ontoRefAnnotatedCommitHandle,
+                                                                                  ref gitRebaseOptions))
+            {
+                RebaseResult rebaseResult = RebaseOperationImpl.Run(rebaseOperationHandle,
+                                                                    this.repository,
+                                                                    committer,
+                                                                    options,
+                                                                    true);
                 return rebaseResult;
-            }
-            finally
-            {
-                branchRefPtr.SafeDispose();
-                branchRefPtr = null;
-                upstreamRefPtr.SafeDispose();
-                upstreamRefPtr = null;
-                ontoRefPtr.SafeDispose();
-                ontoRefPtr = null;
-
-                annotatedBranchCommitHandle.SafeDispose();
-                annotatedBranchCommitHandle = null;
-                annotatedUpstreamRefPtrCommitHandle.SafeDispose();
-                annotatedUpstreamRefPtrCommitHandle = null;
-                annotatedOntoRefPtrCommitHandle.SafeDispose();
-                annotatedOntoRefPtrCommitHandle = null;
-
-                rebaseOperationHandle.SafeDispose();
-                rebaseOperationHandle = null;
             }
         }
 
@@ -170,10 +137,8 @@ namespace LibGit2Sharp
 
             options = options ?? new RebaseOptions();
 
-            RebaseSafeHandle rebase = null;
-            try
+            using (RebaseSafeHandle rebase = Proxy.git_rebase_open(repository.Handle))
             {
-                rebase = Proxy.git_rebase_open(repository.Handle);
                 var rebaseCommitResult = Proxy.git_rebase_commit(rebase, null, committer);
 
                 // Report that we just completed the step
@@ -203,11 +168,6 @@ namespace LibGit2Sharp
                 RebaseResult rebaseResult = RebaseOperationImpl.Run(rebase, repository, committer, options, false);
                 return rebaseResult;
             }
-            finally
-            {
-                rebase.SafeDispose();
-                rebase = null;
-            }
         }
 
         /// <summary>
@@ -215,16 +175,9 @@ namespace LibGit2Sharp
         /// </summary>
         public virtual void Abort()
         {
-            RebaseSafeHandle rebase = null;
-            try
+            using (RebaseSafeHandle rebase = Proxy.git_rebase_open(repository.Handle))
             {
-                rebase = Proxy.git_rebase_open(repository.Handle);
                 Proxy.git_rebase_abort(rebase);
-            }
-            finally
-            {
-                rebase.SafeDispose();
-                rebase = null;
             }
         }
 
@@ -246,11 +199,8 @@ namespace LibGit2Sharp
                 return null;
             }
 
-            RebaseSafeHandle rebaseHandle = null;
-
-            try
+            using (RebaseSafeHandle rebaseHandle = Proxy.git_rebase_open(repository.Handle))
             {
-                rebaseHandle = Proxy.git_rebase_open(repository.Handle);
                 long currentStepIndex = Proxy.git_rebase_operation_current(rebaseHandle);
                 long totalStepCount = Proxy.git_rebase_operation_entrycount(rebaseHandle);
                 GitRebaseOperation gitRebasestepInfo = Proxy.git_rebase_operation_byindex(rebaseHandle, currentStepIndex);
@@ -260,11 +210,6 @@ namespace LibGit2Sharp
                                                   currentStepIndex,
                                                   totalStepCount);
                 return stepInfo;
-            }
-            finally
-            {
-                rebaseHandle.SafeDispose();
-                rebaseHandle = null;
             }
         }
     }

@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
+using LibGit2Sharp;
 using LibGit2Sharp.Core.Handles;
 using LibGit2Sharp.Handlers;
 
@@ -1740,17 +1741,11 @@ namespace LibGit2Sharp.Core
 
             GitRebaseCommitResult commitResult = new GitRebaseCommitResult();
 
-            using (ThreadAffinity())
+            using (SignatureSafeHandle committerHandle = committer.BuildHandle())
+            using (SignatureSafeHandle authorHandle = author.SafeBuildHandle())
             {
-                SignatureSafeHandle authorHandle = null;
-                SignatureSafeHandle committerHandle = null;
-
-                try
+                using (ThreadAffinity())
                 {
-                    committerHandle = committer.BuildHandle();
-                    authorHandle = author == null ?
-                        new SignatureSafeHandle() : author.BuildHandle();
-
                     int result = NativeMethods.git_rebase_commit(ref commitResult.CommitId, rebase, authorHandle, committerHandle, IntPtr.Zero, IntPtr.Zero);
 
                     if (result == (int)GitErrorCode.Applied)
@@ -1762,14 +1757,6 @@ namespace LibGit2Sharp.Core
                     {
                         Ensure.ZeroResult(result);
                     }
-                }
-                finally
-                {
-                    committerHandle.Dispose();
-                    committerHandle = null;
-
-                    authorHandle.SafeDispose();
-                    authorHandle = null;
                 }
             }
 
