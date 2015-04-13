@@ -89,7 +89,7 @@ namespace LibGit2Sharp.Tests
 
                 // Verify the chain of commits that resulted from the rebase.
                 Commit expectedParent = expectedOntoCommit;
-                foreach(CompletedRebaseStepInfo stepInfo in PostRebaseResults)
+                foreach (CompletedRebaseStepInfo stepInfo in PostRebaseResults)
                 {
                     Commit rebasedCommit = stepInfo.Commit;
                     Assert.Equal(expectedParent.Id, rebasedCommit.Parents.First().Id);
@@ -113,7 +113,7 @@ namespace LibGit2Sharp.Tests
 
             public bool WasPatchAlreadyApplied { get; set; }
 
-                        public override string ToString()
+            public override string ToString()
             {
                 return string.Format("CompletedRebaseStepInfo: {0}", Commit);
             }
@@ -128,8 +128,8 @@ namespace LibGit2Sharp.Tests
                     return true;
                 }
 
-                if ((x == null && y != null ) ||
-                    (x != null && y == null ))
+                if ((x == null && y != null) ||
+                    (x != null && y == null))
                 {
                     return false;
                 }

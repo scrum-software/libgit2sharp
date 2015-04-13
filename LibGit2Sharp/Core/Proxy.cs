@@ -1654,28 +1654,28 @@ namespace LibGit2Sharp.Core
             GitAnnotatedCommitHandle onto,
             ref GitRebaseOptions options)
         {
-            RebaseSafeHandle rebase = null;
-
             using (ThreadAffinity())
             {
+                RebaseSafeHandle rebase = null;
+
                 int result = NativeMethods.git_rebase_init(out rebase, repo, branch, upstream, onto, ref options);
                 Ensure.ZeroResult(result);
-            }
 
-            return rebase;
+                return rebase;
+            }
         }
 
         public static RebaseSafeHandle git_rebase_open(RepositorySafeHandle repo)
         {
-            RebaseSafeHandle rebase = null;
-
             using (ThreadAffinity())
             {
+                RebaseSafeHandle rebase = null;
+
                 int result = NativeMethods.git_rebase_open(out rebase, repo);
                 Ensure.ZeroResult(result);
-            }
 
-            return rebase;
+                return rebase;
+            }
         }
 
         public static long git_rebase_operation_entrycount(RebaseSafeHandle rebase)
@@ -1710,9 +1710,9 @@ namespace LibGit2Sharp.Core
         public static GitRebaseOperation git_rebase_next(RebaseSafeHandle rebase,
             ref GitCheckoutOpts options)
         {
-            GitRebaseOperation operation = null;
             using (ThreadAffinity())
             {
+                GitRebaseOperation operation = null;
                 IntPtr ptr;
                 int result = NativeMethods.git_rebase_next(out ptr, rebase, ref options);
                 if (result == (int)GitErrorCode.IterOver)
@@ -1726,9 +1726,9 @@ namespace LibGit2Sharp.Core
 
                 // Workaround until 92e87dd74 from libgit2 is consumed by LibGit2#
                 operation.exec = IntPtr.Zero;
-            }
 
-            return operation;
+                return operation;
+            }
         }
 
         public static GitRebaseCommitResult git_rebase_commit(
@@ -1739,28 +1739,26 @@ namespace LibGit2Sharp.Core
             Ensure.ArgumentNotNull(rebase, "rebase");
             Ensure.ArgumentNotNull(committer, "committer");
 
-            GitRebaseCommitResult commitResult = new GitRebaseCommitResult();
-
+            using (ThreadAffinity())
             using (SignatureSafeHandle committerHandle = committer.BuildHandle())
             using (SignatureSafeHandle authorHandle = author.SafeBuildHandle())
             {
-                using (ThreadAffinity())
+                GitRebaseCommitResult commitResult = new GitRebaseCommitResult();
+
+                int result = NativeMethods.git_rebase_commit(ref commitResult.CommitId, rebase, authorHandle, committerHandle, IntPtr.Zero, IntPtr.Zero);
+
+                if (result == (int)GitErrorCode.Applied)
                 {
-                    int result = NativeMethods.git_rebase_commit(ref commitResult.CommitId, rebase, authorHandle, committerHandle, IntPtr.Zero, IntPtr.Zero);
-
-                    if (result == (int)GitErrorCode.Applied)
-                    {
-                        commitResult.CommitId = GitOid.Empty;
-                        commitResult.WasPatchAlreadyApplied = true;
-                    }
-                    else
-                    {
-                        Ensure.ZeroResult(result);
-                    }
+                    commitResult.CommitId = GitOid.Empty;
+                    commitResult.WasPatchAlreadyApplied = true;
                 }
-            }
+                else
+                {
+                    Ensure.ZeroResult(result);
+                }
 
-            return commitResult;
+                return commitResult;
+            }
         }
 
         /// <summary>

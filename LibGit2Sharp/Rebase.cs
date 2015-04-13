@@ -139,6 +139,9 @@ namespace LibGit2Sharp
 
             using (RebaseSafeHandle rebase = Proxy.git_rebase_open(repository.Handle))
             {
+                // TODO: Should we check the pre-conditions for committing here
+                // for instance - what if we had failed on the git_rebase_finish call,
+                // do we want continue to be able to restart afterwords...
                 var rebaseCommitResult = Proxy.git_rebase_commit(rebase, null, committer);
 
                 // Report that we just completed the step
