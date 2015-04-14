@@ -14,7 +14,6 @@ namespace LibGit2Sharp
         {
             ApplyStep,
             Finish,
-            Finished,
         };
 
         /// <summary>
@@ -42,103 +41,123 @@ namespace LibGit2Sharp
                 GitCheckoutOpts gitCheckoutOpts = checkoutOptionsWrapper.Options;
                 RebaseResult rebaseResult = null;
 
-                RebaseAction action;
-                RebaseStepInfo stepToApplyInfo;
-
-                // This loop will run until either:
-                //   1) All steps have been run or
-                //   2) rebaseResult is set - indicating that the current
-                //      sequence should be stopped and a result needs to be
-                //      reported.
-                while ((action = NextRebaseAction(out stepToApplyInfo, repository, rebaseOperationHandle, isStarting)) == RebaseAction.ApplyStep)
+                // This loop will run until a rebase result has been set.
+                while (rebaseResult == null)
                 {
+                    RebaseStepInfo stepToApplyInfo;
+                    RebaseAction action = NextRebaseAction(out stepToApplyInfo, repository, rebaseOperationHandle, isStarting);
                     isStarting = false;
 
-                    // Report the rebase step we are about to perform.
-                    if (options.RebaseStepStarting != null)
+                    switch (action)
                     {
-                        options.RebaseStepStarting(new BeforeRebaseStepInfo(stepToApplyInfo));
-                    }
-
-                    // Perform the rebase step
-                    GitRebaseOperation rebaseOpReport = Proxy.git_rebase_next(rebaseOperationHandle, ref gitCheckoutOpts);
-
-                    VerifyRebaseOp(rebaseOpReport, stepToApplyInfo);
-
-                    // Handle the result
-                    switch (stepToApplyInfo.Type)
-                    {
-                        case RebaseStepOperation.Pick:
-                            // commit and continue.
-                            if (repository.Index.IsFullyMerged)
-                            {
-                                Proxy.GitRebaseCommitResult rebase_commit_result = Proxy.git_rebase_commit(rebaseOperationHandle, null, committer);
-
-                                // Report that we just completed the step
-                                if (options.RebaseStepCompleted != null)
-                                {
-                                    if (rebase_commit_result.WasPatchAlreadyApplied)
-                                    {
-                                        options.RebaseStepCompleted(new AfterRebaseStepInfo(stepToApplyInfo));
-                                    }
-                                    else
-                                    {
-                                        options.RebaseStepCompleted(new AfterRebaseStepInfo(stepToApplyInfo, repository.Lookup<Commit>(new ObjectId(rebase_commit_result.CommitId))));
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                rebaseResult = new RebaseResult(RebaseStatus.Conflicts,
-                                                                stepToApplyInfo.CurrentStep,
-                                                                stepToApplyInfo.TotalStepCount,
-                                                                null);
-                            }
+                        case RebaseAction.ApplyStep:
+                            rebaseResult = ApplyRebaseStep(rebaseOperationHandle,
+                                                           repository,
+                                                           committer,
+                                                           options,
+                                                           ref gitCheckoutOpts,
+                                                           stepToApplyInfo);
                             break;
-                        case RebaseStepOperation.Squash:
-                        case RebaseStepOperation.Edit:
-                        case RebaseStepOperation.Exec:
-                        case RebaseStepOperation.Fixup:
-                        case RebaseStepOperation.Reword:
-                            // These operations are not yet supported by lg2.
-                            throw new LibGit2SharpException(string.Format(
-                                "Rebase Operation Type ({0}) is not currently supported in LibGit2Sharp.",
-                                stepToApplyInfo.Type));
+                        case RebaseAction.Finish:
+                            rebaseResult = FinishRebase(rebaseOperationHandle, committer, rebaseResult);
+                            break;
                         default:
-                            throw new ArgumentException(string.Format(
-                                "Unexpected Rebase Operation Type: {0}", stepToApplyInfo.Type));
+                            // If we arrived in this else block, it means there is a programing error.
+                            throw new LibGit2SharpException("Unexpected Next Action. Program error.");
                     }
-
-                    // If we have not generated a result that needs to be
-                    // reported, move to the next step.
-                    if (rebaseResult != null)
-                    {
-                        break;
-                    }
-                }
-
-                // If the step being applied is equal to the total step count,
-                // that means all steps have been run and we are finished.
-                if (action == RebaseAction.Finish)
-                {
-                    Debug.Assert(rebaseResult == null);
-
-                    long totalStepCount = Proxy.git_rebase_operation_entrycount(rebaseOperationHandle);
-                    GitRebaseOptions gitRebaseOptions = new GitRebaseOptions()
-                    {
-                        version = 1,
-                    };
-
-                    // Rebase is completed!
-                    Proxy.git_rebase_finish(rebaseOperationHandle, committer, gitRebaseOptions);
-                    rebaseResult = new RebaseResult(RebaseStatus.Complete,
-                                                    totalStepCount,
-                                                    totalStepCount,
-                                                    null);
                 }
 
                 return rebaseResult;
             }
+        }
+
+        private static RebaseResult FinishRebase(RebaseSafeHandle rebaseOperationHandle, Signature committer, RebaseResult rebaseResult)
+        {
+            long totalStepCount = Proxy.git_rebase_operation_entrycount(rebaseOperationHandle);
+            GitRebaseOptions gitRebaseOptions = new GitRebaseOptions()
+            {
+                version = 1,
+            };
+
+            // Rebase is completed!
+            Proxy.git_rebase_finish(rebaseOperationHandle, committer, gitRebaseOptions);
+            rebaseResult = new RebaseResult(RebaseStatus.Complete,
+                                            totalStepCount,
+                                            totalStepCount,
+                                            null);
+            return rebaseResult;
+        }
+
+        private static RebaseResult ApplyRebaseStep(RebaseSafeHandle rebaseOperationHandle, Repository repository, Signature committer, RebaseOptions options, ref GitCheckoutOpts gitCheckoutOpts, RebaseStepInfo stepToApplyInfo)
+        {
+            RebaseResult rebaseResult = null;
+
+            // Report the rebase step we are about to perform.
+            if (options.RebaseStepStarting != null)
+            {
+                options.RebaseStepStarting(new BeforeRebaseStepInfo(stepToApplyInfo));
+            }
+
+            // Perform the rebase step
+            GitRebaseOperation rebaseOpReport = Proxy.git_rebase_next(rebaseOperationHandle, ref gitCheckoutOpts);
+
+            // Verify that the information from the native library is consistent.
+            VerifyRebaseOp(rebaseOpReport, stepToApplyInfo);
+
+            // Handle the result
+            switch (stepToApplyInfo.Type)
+            {
+                case RebaseStepOperation.Pick:
+                    rebaseResult = ApplyPickStep(rebaseOperationHandle, repository, committer, options, stepToApplyInfo);
+                    break;
+                case RebaseStepOperation.Squash:
+                case RebaseStepOperation.Edit:
+                case RebaseStepOperation.Exec:
+                case RebaseStepOperation.Fixup:
+                case RebaseStepOperation.Reword:
+                    // These operations are not yet supported by lg2.
+                    throw new LibGit2SharpException(string.Format(
+                        "Rebase Operation Type ({0}) is not currently supported in LibGit2Sharp.",
+                        stepToApplyInfo.Type));
+                default:
+                    throw new ArgumentException(string.Format(
+                        "Unexpected Rebase Operation Type: {0}", stepToApplyInfo.Type));
+            }
+
+            return rebaseResult;
+        }
+
+        private static RebaseResult ApplyPickStep(RebaseSafeHandle rebaseOperationHandle, Repository repository, Signature committer, RebaseOptions options, RebaseStepInfo stepToApplyInfo)
+        {
+            RebaseResult rebaseResult = null;
+
+            // commit and continue.
+            if (repository.Index.IsFullyMerged)
+            {
+                Proxy.GitRebaseCommitResult rebase_commit_result = Proxy.git_rebase_commit(rebaseOperationHandle, null, committer);
+
+                // Report that we just completed the step
+                if (options.RebaseStepCompleted != null)
+                {
+                    if (rebase_commit_result.WasPatchAlreadyApplied)
+                    {
+                        options.RebaseStepCompleted(new AfterRebaseStepInfo(stepToApplyInfo));
+                    }
+                    else
+                    {
+                        options.RebaseStepCompleted(new AfterRebaseStepInfo(stepToApplyInfo, repository.Lookup<Commit>(new ObjectId(rebase_commit_result.CommitId))));
+                    }
+                }
+            }
+            else
+            {
+                rebaseResult = new RebaseResult(RebaseStatus.Conflicts,
+                                                stepToApplyInfo.CurrentStep,
+                                                stepToApplyInfo.TotalStepCount,
+                                                null);
+            }
+
+            return rebaseResult;
         }
 
         /// <summary>
@@ -178,22 +197,28 @@ namespace LibGit2Sharp
 
             long totalStepCount = Proxy.git_rebase_operation_entrycount(rebaseOperationHandle);
 
-            if (stepToApplyIndex == totalStepCount)
-            {
-                action = RebaseAction.Finish;
-                stepToApply = null;
-            }
-            else
+            if (stepToApplyIndex < totalStepCount)
             {
                 action = RebaseAction.ApplyStep;
 
                 GitRebaseOperation rebaseOp = Proxy.git_rebase_operation_byindex(rebaseOperationHandle, stepToApplyIndex);
                 ObjectId idOfCommitBeingRebased = new ObjectId(rebaseOp.id);
                 stepToApply = new RebaseStepInfo(rebaseOp.type,
-                     repository.Lookup<Commit>(idOfCommitBeingRebased),
-                     LaxUtf8NoCleanupMarshaler.FromNative(rebaseOp.exec),
-                     stepToApplyIndex,
-                     totalStepCount);
+                                                 repository.Lookup<Commit>(idOfCommitBeingRebased),
+                                                 LaxUtf8NoCleanupMarshaler.FromNative(rebaseOp.exec),
+                                                 stepToApplyIndex,
+                                                 totalStepCount);
+            }
+            else if (stepToApplyIndex == totalStepCount)
+            {
+                action = RebaseAction.Finish;
+                stepToApply = null;
+            }
+            else
+            {
+                // This is an unexpected condition - should not happen in normal operation.
+                throw new LibGit2SharpException(string.Format("Current step ({0}) is larger than the total number of steps ({1})",
+                                                stepToApplyIndex, totalStepCount));
             }
 
             return action;
