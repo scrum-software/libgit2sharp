@@ -88,6 +88,7 @@
     <Compile Include="Core\Handles\IndexReucEntrySafeHandle.cs" />
     <Compile Include="EntryExistsException.cs" />
     <Compile Include="FetchOptionsBase.cs" />
+    <Compile Include="GlobalSuppressions.cs" />
     <Compile Include="LogEntry.cs" />
     <Compile Include="FollowFilter.cs" />
     <Compile Include="IBelongToARepository.cs" />
